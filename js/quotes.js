@@ -131,7 +131,8 @@ export function createQuotes({ getCfg, onChange }) {
   async function quefondos(isin, cur, g) {
     const t = await proxyText(QF_URL + encodeURIComponent(isin), g);
     if (!t) return null;
-    const m = t.match(/Valor liquidativo[\s\S]{0,300}?([0-9][0-9.]*,[0-9]+|[0-9]+\.[0-9]+)/i);
+    const plain = t.replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ');   // intermediario propio: llega HTML
+    const m = plain.match(/Valor liquidativo[\s\S]{0,300}?([0-9][0-9.]*,[0-9]+|[0-9]+\.[0-9]+)/i);
     if (!m) return null;
     const s = m[1].includes(',') ? m[1].replace(/\./g, '').replace(',', '.') : m[1];
     const v = parseFloat(s);
@@ -201,7 +202,16 @@ export function createQuotes({ getCfg, onChange }) {
 
     // Orden de la cola: acciones en cartera, fondos y, al final, ideas.
     const yq = (i) => async () => put(i, await yahoo(i.y, g));
+    // Patas del índice compuesto (schema 2): primer símbolo que cotice.
+    const legs = ((pkg.bench && pkg.bench.legs) || []).filter((l) => Array.isArray(l.y) && l.y.length);
+    status.total += legs.length;
+    const legJobs = legs.map((l) => async () => {
+      let q = null;
+      for (const sym of l.y) { q = await yahoo(sym, g); if (q) break; }
+      put({ key: 'b:' + l.k }, q);
+    });
     const queue = viaYahoo.filter((i) => !i.idea).map(yq)
+      .concat(legJobs)
       .concat(funds.map((i) => async () => {
         let q = null;
         if (i.isin) q = await quefondos(i.isin, i.cur, g);

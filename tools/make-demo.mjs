@@ -62,6 +62,22 @@ const pkg = {
     fga: { lbl: 'Crecimiento con inflación', watch: true, date: d(-5), stale: false } },
 };
 
+// schema 2: series inventadas (paseo aleatorio con semilla fija) para las gráficas.
+let seed = 7; const rand = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+const days = []; for (let i = 400; i >= 1; i--) { const t = new Date(); t.setDate(t.getDate() - i); if (t.getDay() % 6) days.push(t.toISOString().slice(0, 10)); }
+let nav = 100, idx = 100, val = value * 0.78, inv = invested * 0.85;
+pkg.schema = 2;
+pkg.nav = []; pkg.bench = { name: 'Compuesto (auto)', rebalance: 'mensual', partial: false, s: [],
+  legs: [{ k: 'ACWI', n: 'MSCI World (acciones grandes)', w: 0.62, y: ['URTH', 'ACWI'] }, { k: 'WSML', n: 'MSCI World Small Cap (pequeñas y medianas)', w: 0.08, y: ['WSML.L'] },
+    { k: 'STOXX', n: 'MSCI World Value (fondos value)', w: 0.12, y: ['XDEV.DE', 'IWVL.L'] }, { k: 'BTC', n: 'Altcoins (pata cripto)', w: 0.18, y: null }] };
+pkg.hist = [];
+days.forEach((dd, i) => {
+  const m = (rand() - 0.47) * 0.018;
+  nav *= 1 + m * 1.2; idx *= 1 + m + (rand() - 0.5) * 0.006;
+  pkg.nav.push([dd, Math.round(nav * 1e4) / 1e4]); pkg.bench.s.push([dd, Math.round(idx * 1e4) / 1e4]);
+  if (rand() < 0.7) { if (i % 60 === 0) inv += 2500; val = val * (1 + m * 1.2) + (i % 60 === 0 ? 2500 : 0); pkg.hist.push([dd, Math.round(val), Math.round(inv)]); }
+});
+
 const b64 = (u) => Buffer.from(u).toString('base64');
 const salt = crypto.getRandomValues(new Uint8Array(16)), iv = crypto.getRandomValues(new Uint8Array(12));
 const base = await crypto.subtle.importKey('raw', new TextEncoder().encode(DEMO_PASS), 'PBKDF2', false, ['deriveKey']);

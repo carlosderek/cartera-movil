@@ -55,7 +55,13 @@ export function compute(pkg, quotes) {
     };
     const at = isLive ? q.at : Date.parse(pkg.generatedAt);
     const today = isNum(chg) && isNum(at) && new Date(at).toDateString() === new Date().toDateString();
-    return { p, px, cur, chg, today, isLive, src: isLive ? q.src : 'Escritorio', at: isLive ? q.at : Date.parse(pkg.generatedAt), val, dayPl: dpl, pl, plPct, priceIn, w: 0 };
+    const thc = (p.th && p.th.cur) || p.cur;
+    const base = p.th && p.th.sc && p.th.sc.base && p.th.sc.base.p;
+    const pxTh = isNum(px) ? priceIn(thc) : null;
+    const pot = isNum(base) && pxTh > 0 ? base / pxTh - 1 : null;              // potencial al escenario base
+    const pxCur = isNum(px) ? priceIn(p.cur) : null;
+    const vsBuy = p.buy > 0 && isNum(pxCur) ? pxCur / p.buy - 1 : null;          // precio frente a tu compra (en su moneda)
+    return { p, px, cur, chg, today, isLive, pot, vsBuy, src: isLive ? q.src : 'Escritorio', at: isLive ? q.at : Date.parse(pkg.generatedAt), val, dayPl: dpl, pl, plPct, priceIn, w: 0 };
   });
   pos.forEach((d) => { d.w = value > 0 ? d.val / value : null; });
 
@@ -70,8 +76,21 @@ export function compute(pkg, quotes) {
     return { i, px: pxIn, chg: q ? q.chg : (sameDay ? i.chg : null), isLive: !!q, hit, dist: isNum(pxIn) && i.trg > 0 ? pxIn / i.trg - 1 : null };
   });
 
+  // Índice compuesto: variación del día (media ponderada de sus patas, como el escritorio).
+  let bench = null;
+  if (pkg.bench && pkg.bench.legs && pkg.bench.legs.length) {
+    let cv = 0, cc = 0;
+    pos.forEach((d) => { if (d.p.ty === 'Cripto' && isNum(d.chg)) { cv += d.val; cc += d.val * d.chg; } });
+    let acc = 0, ws = 0, missing = [];
+    pkg.bench.legs.forEach((l) => {
+      const c = l.y ? (live['b:' + l.k] ? live['b:' + l.k].chg : null) : (cv > 0 ? cc / cv : null);
+      if (isNum(c) && l.w > 0) { acc += l.w * c; ws += l.w; } else missing.push(l.n);
+    });
+    bench = { name: pkg.bench.name || 'Índice compuesto', chg: ws > 0 ? acc / ws : null, cover: ws, missing };
+  }
+
   return {
-    pos, ideas, sameDay, anyToday: pos.some((d) => d.today) && pos.filter((d) => isNum(d.chg) && d.p.ty !== 'Cripto').every((d) => d.today),
+    pos, ideas, sameDay, bench, anyToday: pos.some((d) => d.today) && pos.filter((d) => isNum(d.chg) && d.p.ty !== 'Cripto').every((d) => d.today),
     totals: { value, dayPl, dayPct: value - dayPl > 0 ? dayPl / (value - dayPl) : null, invested, pl: value - invested, plPct: invested > 0 ? (value - invested) / invested : null, cash, grand: value + cash },
     nLive, nPos: pos.length, fxFallback: [...R.used], rate: R.rate,
   };
@@ -105,4 +124,54 @@ export function alertsOf(pkg, M, quotes) {
   out.ideas = M.ideas.filter((x) => x.hit);
   out.count = out.sell.length + out.thesis.filter((x) => x.a.s === 'high').length + out.ideas.length + out.data.filter((x) => x.s === 'high').length;
   return out;
+}
+
+// ---------- distribución ----------
+export const DIST = { ty: 'Tipo', sec: 'Sector', ctry: 'País', cur: 'Moneda' };
+export function distribution(M, by) {
+  const g = {};
+  M.pos.forEach((d) => {
+    let k = by === 'cur' ? (SUB[d.p.cur] ? SUB[d.p.cur][0] : d.p.cur) : d.p[by];
+    if (by === 'cur' && d.p.ty === 'Cripto') k = 'Cripto';
+    k = k || 'Sin dato';
+    g[k] = (g[k] || 0) + d.val;
+  });
+  const tot = M.totals.value || 1;
+  return Object.entries(g).map(([k, v]) => ({ k, v, w: v / tot })).sort((a, b) => b.v - a.v);
+}
+
+// ---------- series ----------
+export const RANGES = [['1m', '1 mes'], ['3m', '3 meses'], ['ytd', 'Este año'], ['1y', '1 año'], ['all', 'Todo']];
+function cutDate(r) {
+  const d = new Date();
+  if (r === 'ytd') return d.getFullYear() + '-01-01';
+  if (r === 'all') return '0000';
+  const n = { '1m': 1, '3m': 3, '1y': 12 }[r] || 12;
+  d.setMonth(d.getMonth() - n);
+  return d.toISOString().slice(0, 10);
+}
+// Patrimonio real (fotos diarias del escritorio) + el punto de hoy con los precios del móvil.
+export function histSeries(pkg, M, r) {
+  if (!pkg.hist || !pkg.hist.length) return null;
+  const pts = pkg.hist.map(([d, v, inv]) => ({ d, v, inv }));
+  const t = todayStr();
+  const last = pts[pts.length - 1];
+  const now = { d: t, v: M.totals.value, inv: M.totals.invested };
+  if (last.d === t) pts[pts.length - 1] = now; else if (last.d < t) pts.push(now);
+  const c = cutDate(r);
+  let out = pts.filter((p) => p.d >= c);
+  if (out.length < 2) out = pts.slice(-2);
+  return out.length >= 2 ? out : null;
+}
+// Cartera (posiciones de hoy) frente al índice, rebasadas a 100 el primer día común del periodo.
+export function vsBench(pkg, r) {
+  if (!pkg.nav || !pkg.bench || !pkg.bench.s) return null;
+  const b = new Map(pkg.bench.s.map(([d, v]) => [d, v]));
+  const c = cutDate(r);
+  const common = pkg.nav.filter(([d]) => d >= c && b.has(d)).map(([d, v]) => ({ d, a: v, b: b.get(d) }));
+  if (common.length < 2) return null;
+  const a0 = common[0].a, b0 = common[0].b;
+  const pts = common.map((x) => ({ d: x.d, a: x.a / a0 * 100, b: x.b / b0 * 100 }));
+  const L = pts[pts.length - 1];
+  return { pts, port: L.a / 100 - 1, bench: L.b / 100 - 1 };
 }

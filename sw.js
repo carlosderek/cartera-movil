@@ -1,9 +1,9 @@
 // sw.js — Guarda la app (no los datos) para abrirla sin conexión.
 // Solo intercepta archivos de la propia app; las peticiones a GitHub, cotizaciones y divisas van siempre a la red.
-const VERSION = 'cartera-1.1.1';
+const VERSION = 'cartera-1.2.0';
 const SHELL = [
   './', 'index.html', 'manifest.webmanifest', 'css/app.css',
-  'js/app.js', 'js/data.js', 'js/quotes.js', 'js/model.js', 'js/views.js', 'js/format.js',
+  'js/app.js', 'js/data.js', 'js/quotes.js', 'js/model.js', 'js/views.js', 'js/format.js', 'js/bio.js',
   'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/maskable-512.png',
 ];
 

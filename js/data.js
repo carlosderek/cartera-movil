@@ -4,7 +4,7 @@
 const CFG_KEY = 'cm_cfg_v1';   // { gistId, pass?, tdKey?, proxy? }
 const ENV_KEY = 'cm_env_v1';   // último sobre CIFRADO descargado (para abrir sin conexión)
 const FILE = 'cartera-movil.json';
-export const SCHEMA = 1;
+export const SCHEMA = 2;   // acepta 1 y 2
 export const DEFAULT_PROXY = 'https://r.jina.ai/{url}';
 export const DEMO_ID = 'demo';
 
@@ -107,5 +107,9 @@ export async function decryptEnvelope(env, pass) {
   if (!Array.isArray(pkg.ideas)) pkg.ideas = [];
   pkg.totals = pkg.totals || {};
   pkg.positions.forEach((p) => { p.th = p.th || {}; p.q = p.q || {}; });
+  // schema 2: series para las gráficas (pueden faltar)
+  const ser = (a) => (Array.isArray(a) ? a.filter((x) => Array.isArray(x) && typeof x[0] === 'string' && x[1] > 0) : null);
+  pkg.hist = ser(pkg.hist); pkg.nav = ser(pkg.nav);
+  if (pkg.bench) { pkg.bench.s = ser(pkg.bench.s); pkg.bench.legs = Array.isArray(pkg.bench.legs) ? pkg.bench.legs : []; }
   return pkg;
 }

@@ -83,6 +83,27 @@ Importes en euros salvo que se diga otra cosa. Porcentajes como fracción (0,05 
 }
 ```
 
+## Añadido en `schema: 2` (escritorio v12.78, móvil 1.2)
+
+Campos nuevos al final del paquete. Todos pueden ser `null`; el móvil acepta también `schema: 1`.
+
+```
+{
+  ...,
+  hist:  [ [fecha "AAAA-MM-DD", valor de las posiciones en EUR, coste en EUR | null], … ],   // foto diaria real (PortSnapshot), hasta 400 días
+  nav:   [ [fecha, nivel], … ],     // curva de la cartera con las posiciones de hoy (la de «Cómo va»), hasta 400 días
+  bench: { name: "Compuesto (auto)", rebalance: "mensual", partial,
+           legs: [ { k ("ACWI"|"WSML"|"STOXX"|"BTC"), n (nombre), w (peso, fracción), y ([símbolos de Yahoo] | null = pata cripto) } ],
+           s: [ [fecha, nivel], … ] | null }   // índice compuesto en EUR con dividendos, hasta 400 días
+}
+```
+
+- `nav` y `bench.s` son niveles: para comparar, rebasar las dos al primer día común del periodo.
+- Variación del día del índice: media ponderada por `w` de la variación de cada pata. Para las patas
+  con `y`, el primer símbolo que cotice; para la cripto (`y: null`), la variación ponderada de las
+  posiciones cripto de la cartera (igual que el escritorio).
+- `hist` no incluye la liquidez.
+
 ## Qué calcula el móvil y qué no
 
 - **Calcula** con los precios que descarga: valor de cada posición (`sh × precio × tipo de cambio`),

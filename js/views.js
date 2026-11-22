@@ -1,12 +1,14 @@
 // views.js — Las pantallas. Cada función devuelve HTML; app.js engancha los eventos por delegación.
 import { eur, signedEur, pct, num, price, cls, date, dateTime, daysUntil, esc, paras, isNum, time, secret } from './format.js';
 import { DEFAULT_PROXY } from './data.js';
+import { DIST, RANGES, distribution, histSeries, vsBench } from './model.js';
 
 const SCN = [['bear', 'Bajista'], ['conservative', 'Conservador'], ['base', 'Base'], ['bull', 'Alcista']];
 const SCN_SHORT = { bear: 'baj.', conservative: 'cons.', base: 'base', bull: 'alc.' };
 const TY = { all: 'Todas', 'Acción': 'Acciones', Cripto: 'Cripto', Fondo: 'Fondos' };
 export const SORTS = [
-  ['val', 'Valor'], ['chg', 'Día %'], ['dayPl', 'Día €'], ['plPct', 'Ganancia %'], ['pl', 'Ganancia €'], ['health', 'Salud'], ['name', 'Nombre'],
+  ['val', 'Valor'], ['chg', 'Día %'], ['dayPl', 'Día €'], ['plPct', 'Ganancia %'], ['pl', 'Ganancia €'],
+  ['pot', 'Potencial al base'], ['vsBuy', 'Precio frente a tu compra'], ['health', 'Salud'], ['name', 'Nombre'],
 ];
 
 const prob = (x) => (isNum(x) ? (x > 1 ? x / 100 : x) : null);
@@ -18,6 +20,81 @@ function healthDot(h) {
   return '<span class="hdot ' + healthCls(h) + '" title="Salud ' + (isNum(h) ? Math.round(h) : '—') + '">' + (isNum(h) ? Math.round(h) : '–') + '</span>';
 }
 function chip(text, kind) { return '<span class="chip ' + (kind || '') + '">' + esc(text) + '</span>'; }
+
+// ---------- gráficas ----------
+function lineChart(lines, opt) {
+  const W = 320, H = 150, P = { l: 4, r: 4, t: 8, b: 20 };
+  const all = lines.flatMap((l) => l.v.filter(isNum));
+  if (!all.length) return '';
+  let lo = Math.min(...all), hi = Math.max(...all);
+  if (hi - lo < 1e-9) { hi += 1; lo -= 1; }
+  const pad = (hi - lo) * 0.08; lo -= pad; hi += pad;
+  const n = lines[0].v.length;
+  const x = (i) => P.l + (n > 1 ? i / (n - 1) : 0) * (W - P.l - P.r);
+  const y = (v) => P.t + (1 - (v - lo) / (hi - lo)) * (H - P.t - P.b);
+  let g = '';
+  if (isNum(opt.ref)) g += '<line class="ref" x1="' + P.l + '" x2="' + (W - P.r) + '" y1="' + y(opt.ref).toFixed(1) + '" y2="' + y(opt.ref).toFixed(1) + '"/>';
+  lines.forEach((l) => {
+    let d = '', pen = false;
+    l.v.forEach((v, i) => { if (!isNum(v)) { pen = false; return; } d += (pen ? 'L' : 'M') + x(i).toFixed(1) + ' ' + y(v).toFixed(1); pen = true; });
+    if (!d) return;
+    if (l.fill) {
+      const first = l.v.findIndex(isNum), last = l.v.length - 1 - [...l.v].reverse().findIndex(isNum);
+      g += '<path class="area ' + l.cls + '" d="' + d + 'L' + x(last).toFixed(1) + ' ' + (H - P.b) + 'L' + x(first).toFixed(1) + ' ' + (H - P.b) + 'Z"/>';
+    }
+    g += '<path class="ln ' + l.cls + '" d="' + d + '"/>';
+  });
+  g += '<text class="ax" x="' + P.l + '" y="' + (H - 5) + '">' + esc(opt.from) + '</text><text class="ax end" x="' + (W - P.r) + '" y="' + (H - 5) + '">' + esc(opt.to) + '</text>';
+  return '<svg class="chart" viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none" role="img" aria-label="' + esc(opt.label || 'Gráfica') + '">' + g + '</svg>';
+}
+function rangeChips(cur, attr) {
+  return '<div class="chips">' + RANGES.map(([k, l]) => '<button data-' + attr + '="' + k + '" class="' + (cur === k ? 'on' : '') + '">' + l + '</button>').join('') + '</div>';
+}
+function histCard(S) {
+  const pts = histSeries(S.pkg, S.M, S.ui.range);
+  if (!pts) return '';
+  const v0 = pts[0], v1 = pts[pts.length - 1];
+  const gain0 = isNum(v0.inv) ? v0.v - v0.inv : null, gain1 = isNum(v1.inv) ? v1.v - v1.inv : null;
+  const dg = isNum(gain0) && isNum(gain1) ? gain1 - gain0 : null;
+  return '<section class="card"><h2>Evolución del patrimonio</h2>' + rangeChips(S.ui.range, 'range') +
+    lineChart([{ v: pts.map((p) => p.inv), cls: 'inv' }, { v: pts.map((p) => p.v), cls: 'val', fill: true }], { from: date(v0.d), to: date(v1.d), label: 'Valor de las posiciones' }) +
+    '<div class="legend"><span><i class="lg val"></i>Valor de las posiciones</span><span><i class="lg inv"></i>Coste</span></div>' +
+    '<div class="kv"><span>Cambio del valor</span><b class="' + cls(v1.v - v0.v) + '">' + signedEur(v1.v - v0.v) + '</b></div>' +
+    (isNum(dg) ? '<div class="kv"><span>Cambio de la ganancia <small class="muted">(descuenta aportaciones)</small></span><b class="' + cls(dg) + '">' + signedEur(dg) + '</b></div>' : '') +
+    '<p class="foot">Fotos diarias del escritorio (solo los días que lo abriste) y el punto de hoy con los precios del móvil. No incluye la liquidez.</p></section>';
+}
+function benchCard(S) {
+  const r = vsBench(S.pkg, S.ui.brange);
+  const b = S.M.bench;
+  if (!r && !b) return '';
+  let h = '<section class="card"><h2>Frente al ' + esc((S.pkg.bench && S.pkg.bench.name) || 'índice') + '</h2>';
+  if (b && isNum(b.chg)) {
+    const me = S.M.totals.dayPct;
+    const diff = isNum(me) ? me - b.chg : null;
+    h += '<div class="vs"><div><span>Tu cartera</span><b class="' + cls(me) + '">' + pct(me) + '</b></div><div><span>Índice</span><b class="' + cls(b.chg) + '">' + pct(b.chg) + '</b></div>' +
+      '<div><span>Diferencia</span><b class="' + cls(diff) + '">' + (isNum(diff) ? pct(diff).replace(' %', ' pp') : '—') + '</b></div></div>' +
+      '<p class="foot">Variación ' + (S.M.anyToday ? 'de hoy' : 'de la última sesión') + '.' + (b.missing.length ? ' Sin dato: ' + esc(b.missing.join(', ')) + '.' : '') + '</p>';
+  }
+  if (r) {
+    h += rangeChips(S.ui.brange, 'brange') +
+      lineChart([{ v: r.pts.map((p) => p.b), cls: 'bench' }, { v: r.pts.map((p) => p.a), cls: 'port' }], { from: date(r.pts[0].d), to: date(r.pts[r.pts.length - 1].d), ref: 100, label: 'Cartera frente al índice' }) +
+      '<div class="legend"><span><i class="lg port"></i>Tu cartera <b class="' + cls(r.port) + '">' + pct(r.port, 1) + '</b></span><span><i class="lg bench"></i>Índice <b class="' + cls(r.bench) + '">' + pct(r.bench, 1) + '</b></span></div>' +
+      '<p class="foot">Curva de la cartera con las posiciones de hoy (no cuenta compras y ventas pasadas), la misma de «Cómo va» en el escritorio. Índice en euros con dividendos, rebalanceo ' + esc((S.pkg.bench && S.pkg.bench.rebalance) || 'mensual') + '.</p>';
+  } else if (S.pkg.schema >= 2) h += '<p class="foot">El escritorio aún no ha subido las series del periodo: se añaden cuando lo abres y carga «Cómo va».</p>';
+  const legs = (S.pkg.bench && S.pkg.bench.legs) || [];
+  if (legs.length) h += '<div class="legs">' + legs.map((l) => '<span>' + esc(l.n) + ' <b>' + pct(l.w, 0, false) + '</b></span>').join('') + '</div>';
+  return h + '</section>';
+}
+function distCard(S) {
+  const by = S.ui.dist;
+  const rows = distribution(S.M, by);
+  const show = rows.slice(0, 8), rest = rows.slice(8);
+  if (rest.length) show.push({ k: 'Otros (' + rest.length + ')', v: rest.reduce((a, b) => a + b.v, 0), w: rest.reduce((a, b) => a + b.w, 0) });
+  const max = Math.max(...show.map((r) => r.w), 0.0001);
+  return '<section class="card"><h2>Distribución</h2><div class="chips">' + Object.entries(DIST).map(([k, l]) => '<button data-dist="' + k + '" class="' + (by === k ? 'on' : '') + '">' + l + '</button>').join('') + '</div>' +
+    show.map((r) => '<div class="dbar"><div class="dlbl"><span>' + esc(r.k) + '</span><b>' + pct(r.w, 1, false) + ' <small class="muted">' + eur(r.v) + '</small></b></div><div class="dtrack"><i style="width:' + (r.w / max * 100).toFixed(1) + '%"></i></div></div>').join('') +
+    '<p class="foot">Sobre el valor de las posiciones, sin liquidez.</p></section>';
+}
 
 // ---------- Resumen ----------
 function cycleLine(c) {
@@ -63,15 +140,18 @@ export function summary(S) {
   return '<section class="hero">' +
     '<div class="lbl">Patrimonio</div><div class="big">' + eur(T.grand) + '</div>' +
     '<div class="day ' + cls(T.dayPl) + '">' + (noDay ? '<span class="muted">Sin variación del día todavía</span>' : signedEur(T.dayPl) + ' · ' + pct(T.dayPct) + (M.anyToday ? ' hoy' : ' en la última sesión')) + '</div>' +
+    (S.M.bench && isNum(S.M.bench.chg) ? '<div class="idx">Índice compuesto <b class="' + cls(S.M.bench.chg) + '">' + pct(S.M.bench.chg) + '</b></div>' : '') +
     '<div class="kv3">' +
       '<div><span>Posiciones</span><b>' + eur(T.value) + '</b></div>' +
       '<div><span>Ganancia</span><b class="' + cls(T.pl) + '">' + signedEur(T.pl) + '</b><small class="' + cls(T.pl) + '">' + pct(T.plPct, 1) + '</small></div>' +
       '<div><span>Liquidez</span><b>' + eur(T.cash) + '</b><small class="muted">' + (T.grand > 0 ? pct(T.cash / T.grand, 1, false) : '') + '</small></div>' +
     '</div></section>' +
     (alerts.count ? '<a class="card alert-link" href="#/avisos"><span class="badge">' + alerts.count + '</span> ' + (alerts.count === 1 ? 'aviso importante' : 'avisos importantes') + chev + '</a>' : '') +
+    histCard(S) + benchCard(S) +
     cycleLine(pkg.cycle) +
     '<section class="card"><h2>Las que más suben</h2>' + (up.length ? up.map(moverRow).join('') : '<p class="empty">' + (noDay ? 'Esperando cotizaciones…' : 'Ninguna sube hoy.') + '</p>') + '</section>' +
     '<section class="card"><h2>Las que más bajan</h2>' + (down.length ? down.map(moverRow).join('') : '<p class="empty">' + (noDay ? 'Esperando cotizaciones…' : 'Ninguna baja hoy.') + '</p>') + '</section>' +
+    distCard(S) +
     (pkg.cash.length ? '<section class="card"><h2>Liquidez</h2>' + pkg.cash.map((c) => '<div class="kv"><span>' + esc(c.n) + '</span><b>' + eur(c.a) + '</b></div>').join('') + '</section>' : '');
 }
 
@@ -79,13 +159,16 @@ export function summary(S) {
 function sortVal(d, k) {
   switch (k) {
     case 'chg': return d.chg; case 'dayPl': return d.dayPl; case 'plPct': return d.plPct; case 'pl': return d.pl;
+    case 'pot': return d.pot; case 'vsBuy': return d.vsBuy;
     case 'health': return d.p.th && d.p.th.health; default: return d.val;
   }
 }
-export function positions(S) {
+export function positionsList(S) {
   const { M, ui } = S;
   let list = M.pos.slice();
   if (ui.filter !== 'all') list = list.filter((d) => d.p.ty === ui.filter);
+  const q = (ui.q || '').trim().toLowerCase();
+  if (q) list = list.filter((d) => [d.p.t, d.p.n, d.p.sec, d.p.ctry].some((x) => x && String(x).toLowerCase().includes(q)));
   const dir = ui.dir === 'asc' ? 1 : -1;
   if (ui.sort === 'name') list.sort((a, b) => dir * -1 * String(a.p.t).localeCompare(String(b.p.t), 'es'));
   else list.sort((a, b) => {
@@ -93,21 +176,44 @@ export function positions(S) {
     if (!isNum(x) && !isNum(y)) return 0; if (!isNum(x)) return 1; if (!isNum(y)) return -1;
     return dir * (x - y);
   });
-  const types = ['all', ...new Set(M.pos.map((d) => d.p.ty).filter(Boolean))];
   const total = list.reduce((s, d) => s + d.val, 0);
-  return '<div class="toolbar">' +
-    '<div class="seg-ctl">' + types.map((t) => '<button data-filter="' + esc(t) + '" class="' + (ui.filter === t ? 'on' : '') + '">' + esc(TY[t] || t) + '</button>').join('') + '</div>' +
-    '<div class="sort"><label>Ordenar <select id="sort">' + SORTS.map(([k, l]) => '<option value="' + k + '"' + (ui.sort === k ? ' selected' : '') + '>' + l + '</option>').join('') + '</select></label>' +
-    '<button id="sortdir" class="icon" aria-label="Cambiar sentido">' + (ui.dir === 'asc' ? '↑' : '↓') + '</button></div></div>' +
-    '<div class="list-head"><span>' + list.length + ' posiciones</span><span>' + eur(total) + '</span></div>' +
-    '<section class="card flush">' + list.map((d) => {
+  const extra = (d) => ui.sort === 'pot' ? ' · potencial <b class="' + cls(d.pot) + '">' + pct(d.pot, 0) + '</b>'
+    : ui.sort === 'vsBuy' ? ' · <b class="' + cls(d.vsBuy) + '">' + pct(d.vsBuy, 1) + '</b> frente a tu compra' : '';
+  return '<div class="list-head"><span>' + list.length + ' posiciones</span><span>' + eur(total) + '</span></div>' +
+    (list.length ? '<section class="card flush">' + list.map((d) => {
       const p = d.p;
       return '<a class="prow" href="#/pos/' + encodeURIComponent(p.id) + '">' +
         healthDot(p.th && p.th.health) +
-        '<div class="prow-l"><b>' + esc(p.t) + (d.isLive ? '' : ' <i class="stale" title="Precio del escritorio">•</i>') + '</b><small>' + esc(p.n) + '</small><small class="muted">' + pct(d.w, 1, false) + ' de la cartera</small></div>' +
+        '<div class="prow-l"><b>' + esc(p.t) + (d.isLive ? '' : ' <i class="stale" title="Precio del escritorio">•</i>') + '</b><small>' + esc(p.n) + '</small><small class="muted">' + pct(d.w, 1, false) + ' de la cartera' + extra(d) + '</small></div>' +
         '<div class="prow-r"><b>' + eur(d.val) + '</b><span class="' + cls(d.chg) + '">' + (isNum(d.chg) ? pct(d.chg) + ' ' + dayWord(d) : '— hoy') + '</span><small class="' + cls(d.pl) + '">' + pct(d.plPct, 1) + ' · ' + signedEur(d.pl) + '</small></div></a>';
-    }).join('') + '</section>' +
-    '<p class="foot">• = sin cotización actual, valorada con el último precio del escritorio.</p>';
+    }).join('') + '</section>' : '<p class="empty">Ninguna posición coincide.</p>') +
+    '<p class="foot">• = sin cotización actual, valorada con el último precio del escritorio.' + (ui.sort === 'pot' ? ' Potencial: escenario base de la tesis frente al precio de hoy.' : '') + '</p>';
+}
+export function positions(S) {
+  const { M, ui } = S;
+  const types = ['all', ...new Set(M.pos.map((d) => d.p.ty).filter(Boolean))];
+  return '<div class="toolbar">' +
+    '<input id="q" class="search" type="search" placeholder="Buscar ticker, nombre, sector o país" value="' + esc(ui.q || '') + '" autocomplete="off" spellcheck="false">' +
+    '<div class="seg-ctl">' + types.map((t) => '<button data-filter="' + esc(t) + '" class="' + (ui.filter === t ? 'on' : '') + '">' + esc(TY[t] || t) + '</button>').join('') + '</div>' +
+    '<div class="sort"><label>Ordenar <select id="sort">' + SORTS.map(([k, l]) => '<option value="' + k + '"' + (ui.sort === k ? ' selected' : '') + '>' + l + '</option>').join('') + '</select></label>' +
+    '<button id="sortdir" class="icon" aria-label="Cambiar sentido">' + (ui.dir === 'asc' ? '↑' : '↓') + '</button></div></div>' +
+    '<div id="plist">' + positionsList(S) + '</div>';
+}
+
+// ---------- Ideas ----------
+export function ideas(S) {
+  const key = (x) => (x.hit ? -1 : isNum(x.dist) ? Math.abs(x.dist) : 9);
+  const list = S.M.ideas.slice().sort((a, b) => key(a) - key(b));
+  if (!list.length) return '<div class="card"><p class="empty">No hay ideas activas en el escritorio.</p></div>';
+  return '<div class="list-head"><span>' + list.length + ' ideas activas</span><span>por cercanía al disparo</span></div><section class="card flush">' + list.map((x) => {
+    const i = x.i, pot = isNum(i.base) && x.px > 0 ? i.base / x.px - 1 : null;
+    const conv = isNum(i.conv) ? ' <span class="conv">' + [1, 2, 3, 4, 5].map((k) => '<i class="' + (k <= i.conv ? 'on' : '') + '"></i>').join('') + '</span>' : '';
+    return '<div class="prow idea' + (x.hit ? ' hit' : '') + '"><div class="prow-l"><b>' + esc(i.t) + (x.isLive ? '' : ' <i class="stale" title="Precio del escritorio">•</i>') + conv + '</b><small>' + esc(i.n) + '</small>' +
+      '<small class="muted">Disparo ' + price(i.trg, i.cur) + ' (' + (i.dir === 'above' ? 'por encima' : 'por debajo') + ')' + (isNum(i.base) ? ' · base ' + price(i.base, i.cur) : '') + '</small></div>' +
+      '<div class="prow-r"><b>' + price(x.px, i.cur) + '</b><span class="' + cls(x.chg) + '">' + (isNum(x.chg) ? pct(x.chg) : '—') + '</span>' +
+      '<small>' + (x.hit ? '<span class="chip ok">en precio</span>' : isNum(x.dist) ? 'a ' + pct(Math.abs(x.dist), 1, false) + ' del disparo' : '—') + '</small>' +
+      (isNum(pot) ? '<small class="' + cls(pot) + '">potencial ' + pct(pot, 0) + '</small>' : '') + '</div></div>';
+  }).join('') + '</section><p class="foot">• = sin cotización actual. El paquete solo trae de cada idea el precio, el disparo, la convicción y el objetivo base.</p>';
 }
 
 // ---------- Ficha ----------
@@ -247,25 +353,35 @@ export function setup(cfg, msg) {
 
 export function locked(cfg, msg, offline) {
   return '<section class="card form"><h1>Cartera bloqueada</h1>' +
-    '<p class="muted">Escribe la contraseña de cifrado para abrir la copia de la cartera.</p>' +
+    (cfg.bio ? '<button class="btn primary bio" id="b-bio">' + FP + ' Desbloquear con huella</button><p class="muted center">o escribe la contraseña</p>'
+      : '<p class="muted">Escribe la contraseña de cifrado para abrir la copia de la cartera.</p>') +
     '<form id="f-unlock" autocomplete="off">' +
-    '<label>Contraseña<input name="pass" type="password" required autocomplete="current-password" autofocus></label>' +
-    '<label class="check"><input name="remember" type="checkbox"> Recordar en este móvil</label>' +
+    '<label>Contraseña<input name="pass" type="password" required autocomplete="current-password"' + (cfg.bio ? '' : ' autofocus') + '></label>' +
+    (cfg.bio ? '' : '<label class="check"><input name="remember" type="checkbox"> Recordar en este móvil</label>') +
     (msg ? '<p class="msg err">' + esc(msg) + '</p>' : '') +
     (offline ? '<p class="msg">Sin conexión: se abrirá la última copia guardada.</p>' : '') +
     '<button class="btn primary" type="submit">Abrir</button></form>' +
     '<p class="foot">Gist ' + esc(cfg.gistId) + ' · <a href="#/ajustes">Ajustes</a></p></section>';
 }
 
-export function settings(cfg, info) {
+const FP = '<svg class="fp" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 11v3a8 8 0 0 1-1.5 4.7"/><path d="M8.5 9.5A4 4 0 0 1 16 11v1.5a12 12 0 0 1-.8 4.3"/><path d="M5.6 7.6A8 8 0 0 1 20 12v.5"/><path d="M4 12a8 8 0 0 1 .3-2.2"/><path d="M7.6 19.5A12 12 0 0 0 8 16v-5a4 4 0 0 1 .3-1.5"/><path d="M18.5 17.5c.3-1 .5-2 .5-3"/></svg>';
+export function settings(cfg, info, bioOk) {
   return '<a class="back" href="#/resumen">‹ Volver</a>' +
     '<section class="card form"><h1>Ajustes</h1><form id="f-settings" autocomplete="off">' +
     '<label>Identificador del gist<input name="gist" value="' + esc(cfg.gistId || '') + '" autocapitalize="off" spellcheck="false"></label>' +
     '<label>Clave de Twelve Data <small>(opcional: tiempo real para acciones de EE. UU.)</small><input name="td" type="password" value="' + esc(cfg.tdKey || '') + '" autocapitalize="off" spellcheck="false" placeholder="Sin clave: todo por Yahoo, ~15 min de retraso"></label>' +
     '<label>Intermediario para Yahoo y fondos<input name="proxy" value="' + esc(cfg.proxy || '') + '" placeholder="' + esc(DEFAULT_PROXY) + '" autocapitalize="off" spellcheck="false"></label>' +
     '<p class="foot">{url} se sustituye por la dirección de Yahoo tal cual; {urlenc}, codificada. Vacío = ' + esc(DEFAULT_PROXY) + '.</p>' +
-    '<label class="check"><input name="remember" type="checkbox"' + (cfg.pass ? ' checked' : '') + '> Recordar la contraseña en este móvil</label>' +
+    (cfg.bio ? '' : '<label class="check"><input name="remember" type="checkbox"' + (cfg.pass ? ' checked' : '') + '> Recordar la contraseña en este móvil (sin cifrar)</label>') +
+    '<label class="check"><input name="privStart" type="checkbox"' + (cfg.privStart ? ' checked' : '') + '> Abrir siempre con los importes ocultos</label>' +
     '<button class="btn primary" type="submit">Guardar</button></form></section>' +
+    '<section class="card"><h2>Desbloqueo con huella</h2>' +
+    (cfg.bio
+      ? '<p>Activado desde el ' + dateTime(cfg.bio.at) + '. La contraseña se guarda cifrada y solo se abre con tu huella o el bloqueo de pantalla del móvil.</p><button class="btn" id="b-bio-off">Desactivar</button>'
+      : bioOk
+        ? '<p class="muted">Guarda la contraseña cifrada con una llave de acceso de este móvil: abrirás la app con la huella y la contraseña deja de estar en claro.</p><button class="btn" id="b-bio-on">' + FP + ' Activar</button>'
+        : '<p class="muted">Este navegador no permite llaves de acceso.</p>') +
+    '<p class="msg" id="bio-msg"></p></section>' +
     '<section class="card"><h2>Estado</h2>' + info.map(([k, v]) => '<div class="kv"><span>' + esc(k) + '</span><b>' + esc(v) + '</b></div>').join('') + '</section>' +
     '<section class="card"><h2>Este dispositivo</h2>' +
     '<button class="btn" id="b-lock">Bloquear ahora</button> ' +
