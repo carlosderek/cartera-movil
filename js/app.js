@@ -3,7 +3,7 @@ import { loadCfg, saveCfg, cachedEnvelope, forgetAll, fetchEnvelope, decryptEnve
 import { createQuotes } from './quotes.js';
 import { compute, alertsOf } from './model.js';
 import * as V from './views.js';
-import { ago, time, dateTime } from './format.js';
+import { ago, time, dateTime, setPriv } from './format.js';
 
 const UI_KEY = 'cm_ui_v1';
 const QUOTE_EVERY = 5 * 60 * 1000;
@@ -18,7 +18,8 @@ const S = {
   msg: null,
   ui: Object.assign({ sort: 'val', dir: 'desc', filter: 'all' }, (() => { try { return JSON.parse(localStorage.getItem(UI_KEY) || '{}'); } catch (e) { return {}; } })(), { open: new Set() }),
 };
-const saveUi = () => { try { localStorage.setItem(UI_KEY, JSON.stringify({ sort: S.ui.sort, dir: S.ui.dir, filter: S.ui.filter })); } catch (e) {} };
+const saveUi = () => { try { localStorage.setItem(UI_KEY, JSON.stringify({ sort: S.ui.sort, dir: S.ui.dir, filter: S.ui.filter, priv: !!S.ui.priv })); } catch (e) {} };
+setPriv(S.ui.priv);
 
 const quotes = createQuotes({ getCfg: () => S.cfg, onChange: () => schedule() });
 
@@ -66,6 +67,11 @@ function header() {
   const sub = $('#sub'), ready = S.phase === 'ready' && S.pkg;
   document.body.classList.toggle('clone', !!(S.pkg && S.pkg.clone));
   $('#b-refresh').hidden = !ready;
+  const eye = $('#b-priv');
+  eye.hidden = !ready;
+  eye.setAttribute('aria-pressed', S.ui.priv ? 'true' : 'false');
+  eye.setAttribute('aria-label', S.ui.priv ? 'Mostrar importes' : 'Ocultar importes');
+  eye.classList.toggle('on', !!S.ui.priv);
   if (!ready) { sub.textContent = ''; $('#notice').hidden = true; return; }
   const st = quotes.status;
   const q = st.running ? (st.waiting ? 'Precios ' + st.done + '/' + st.total + ' · esperando turno' : 'Precios ' + st.done + '/' + st.total + '…')
@@ -103,7 +109,7 @@ function statusInfo() {
   }
   info.push(['Twelve Data', S.cfg.tdKey ? 'con clave' : 'sin clave']);
   info.push(['Contraseña', S.cfg.pass ? 'recordada en este móvil' : 'se pide al abrir']);
-  info.push(['Versión de la app', '1.0.0']);
+  info.push(['Versión de la app', '1.1.0']);
   return info;
 }
 
@@ -212,6 +218,7 @@ document.addEventListener('click', (ev) => {
   const t = ev.target.closest('button');
   if (!t) return;
   if (t.id === 'b-refresh') manualRefresh();
+  else if (t.id === 'b-priv') { S.ui.priv = !S.ui.priv; setPriv(S.ui.priv); saveUi(); render(true); }
   else if (t.id === 'b-retry') boot();
   else if (t.dataset.filter) { S.ui.filter = t.dataset.filter; saveUi(); render(true); }
   else if (t.id === 'sortdir') { S.ui.dir = S.ui.dir === 'asc' ? 'desc' : 'asc'; saveUi(); render(true); }

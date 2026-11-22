@@ -1,5 +1,5 @@
 // views.js — Las pantallas. Cada función devuelve HTML; app.js engancha los eventos por delegación.
-import { eur, signedEur, pct, num, price, cls, date, dateTime, daysUntil, esc, paras, isNum, time } from './format.js';
+import { eur, signedEur, pct, num, price, cls, date, dateTime, daysUntil, esc, paras, isNum, time, secret } from './format.js';
 import { DEFAULT_PROXY } from './data.js';
 
 const SCN = [['bear', 'Bajista'], ['conservative', 'Conservador'], ['base', 'Base'], ['bull', 'Alcista']];
@@ -199,7 +199,7 @@ export function detail(S, id) {
       '<div><span>Peso</span><b>' + pct(d.w, 1, false) + '</b></div>' +
       '<div><span>Ganancia</span><b class="' + cls(d.pl) + '">' + signedEur(d.pl) + '</b></div>' +
       '<div><span>Ganancia %</span><b class="' + cls(d.plPct) + '">' + pct(d.plPct, 1) + '</b></div>' +
-      '<div><span>Títulos</span><b>' + num(p.sh, p.sh % 1 ? 4 : 0) + '</b></div>' +
+      '<div><span>Títulos</span><b>' + secret(num(p.sh, p.sh % 1 ? 4 : 0)) + '</b></div>' +
       '<div><span>Precio medio</span><b>' + price(p.buy, cur) + '</b></div>' +
       '<div><span>Invertido</span><b>' + eur(p.inv) + '</b></div>' +
       '<div><span>Moneda</span><b>' + esc(cur || '—') + '</b></div>' +

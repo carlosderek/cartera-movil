@@ -31,6 +31,9 @@ svg { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; 
 .icon { width: 40px; height: 40px; display: inline-flex; align-items: center; justify-content: center; background: none; border: 0; color: var(--fg2); border-radius: 10px; cursor: pointer; font: 600 17px var(--sans); }
 .icon:active { background: var(--bg2); }
 .icon[hidden] { display: none; }
+.eye .eye-off, .eye.on .eye-open { display: none; }
+.eye.on .eye-off { display: block; }
+.eye.on { color: var(--amber); }
 .icon svg { width: 22px; height: 22px; }
 .icon.spinning svg { animation: rot 1s linear infinite; color: var(--amber); }
 @keyframes rot { to { transform: rotate(360deg); } }

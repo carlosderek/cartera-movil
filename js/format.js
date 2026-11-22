@@ -12,10 +12,17 @@ export const isNum = (x) => typeof x === 'number' && isFinite(x);
 
 export function num(x, d = 2) { return isNum(x) ? nf(d).format(x) : '—'; }
 
-export function eur(x, d = 0) { return isNum(x) ? nf(d).format(x) + ' €' : '—'; }
+// Modo privado: oculta importes en euros y número de títulos (porcentajes y precios siguen a la vista).
+let PRIV = false;
+export function setPriv(b) { PRIV = !!b; }
+export const MASK = '•••••';
+export function secret(s) { return PRIV ? MASK : s; }
+
+export function eur(x, d = 0) { return isNum(x) ? (PRIV ? MASK + ' €' : nf(d).format(x) + ' €') : '—'; }
 
 export function signedEur(x, d = 0) {
   if (!isNum(x)) return '—';
+  if (PRIV) return MASK + ' €';
   return (x > 0 ? '+' : x < 0 ? '−' : '') + nf(d).format(Math.abs(x)) + ' €';
 }
 
