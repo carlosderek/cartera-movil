@@ -6,7 +6,7 @@ import * as V from './views.js';
 import * as Bio from './bio.js';
 import { ago, time, dateTime, setPriv } from './format.js';
 
-const APP_VERSION = '1.2.0';
+const APP_VERSION = '1.2.1';
 const UI_KEY = 'cm_ui_v1';
 const QUOTE_EVERY = 5 * 60 * 1000;
 const $ = (s) => document.querySelector(s);
@@ -122,13 +122,15 @@ function statusInfo() {
   }
   info.push(['Twelve Data', S.cfg.tdKey ? 'con clave' : 'sin clave']);
   info.push(['Intermediario', S.cfg.proxy ? 'propio' : 'r.jina.ai']);
-  info.push(['Contraseña', S.cfg.bio ? 'cifrada con la huella' : S.cfg.pass ? 'recordada sin cifrar' : 'se pide al abrir']);
+  info.push(['Contraseña', S.cfg.bio ? 'cifrada con la huella' : S.cfg.gate ? 'sin cifrar, abre con huella (bloqueo simple)' : S.cfg.pass ? 'recordada sin cifrar' : 'se pide al abrir']);
   info.push(['Versión de la app', APP_VERSION]);
   return info;
 }
 
 // ---------- carga ----------
-function passNow() { return S.cfg.pass || S.pass; }
+// Con bloqueo simple la contraseña guardada solo se usa después de pasar la huella.
+function passNow() { return S.pass || (S.cfg.gate ? null : S.cfg.pass); }
+const RELOCK_MS = 5 * 60 * 1000;
 
 async function open(pass, { fromForm } = {}) {
   S.phase = 'loading'; S.msg = 'Descifrando…'; render(true);
@@ -155,7 +157,7 @@ async function open(pass, { fromForm } = {}) {
   } catch (e) {
     if (e instanceof UserError && e.code === 'badpass') {
       S.cfg.pass = undefined; saveCfg(S.cfg); S.pass = null;
-      S.phase = 'locked'; S.msg = S.cfg.bio ? 'La contraseña guardada con la huella ya no vale (¿la cambiaste en el escritorio?). Escribe la nueva.' : 'Contraseña incorrecta.';
+      S.phase = 'locked'; S.msg = S.cfg.bio || S.cfg.gate ? 'La contraseña guardada con la huella ya no vale (¿la cambiaste en el escritorio?). Escribe la nueva.' : 'Contraseña incorrecta.';
     } else { S.phase = 'error'; S.msg = e.message || String(e); }
     render(true);
     return false;
@@ -193,9 +195,15 @@ function manualRefresh() {
 }
 
 async function bioUnlock() {
-  if (!S.cfg.bio) return;
+  if (!S.cfg.bio && !S.cfg.gate) return;
   try {
-    const pass = await Bio.unlock(S.cfg.bio);
+    let pass;
+    if (S.cfg.bio) pass = await Bio.unlock(S.cfg.bio);
+    else {
+      if (!S.cfg.pass) { S.phase = 'locked'; S.msg = 'Escribe la contraseña una vez; después bastará la huella.'; render(true); return; }
+      await Bio.verifyGate(S.cfg.gate.id);
+      pass = S.cfg.pass;
+    }
     if (await open(pass)) location.hash = location.hash || '#/resumen';
   } catch (e) { S.phase = 'locked'; S.msg = e.message; render(true); }
 }
@@ -204,11 +212,12 @@ function boot() {
   if (!S.cfg.gistId) { S.phase = 'setup'; render(true); return; }
   if (passNow()) { open(passNow()); return; }
   S.phase = 'locked'; render(true);
-  if (S.cfg.bio) bioUnlock();
+  if (S.cfg.bio || S.cfg.gate) bioUnlock();
 }
 
 function lock() {
-  S.cfg.pass = undefined; saveCfg(S.cfg); S.pass = null; S.pkg = null; quotes.stop();
+  if (!S.cfg.gate) { S.cfg.pass = undefined; saveCfg(S.cfg); }   // con bloqueo simple se conserva
+  S.pass = null; S.pkg = null; quotes.stop();
   if (S.cfg.privStart) { S.ui.priv = true; setPriv(true); }
   S.phase = 'locked'; S.msg = null; location.hash = '#/resumen'; render(true);
 }
@@ -230,6 +239,7 @@ document.addEventListener('submit', async (ev) => {
     const pass = val('pass');
     S.pass = pass; if (chk('remember')) { S.cfg.pass = pass; saveCfg(S.cfg); }
     if (await open(pass, { fromForm: true })) {
+      if (S.cfg.gate) { S.cfg.pass = pass; saveCfg(S.cfg); }
       // Con huella activada y contraseña nueva: se vuelve a guardar cifrada.
       if (S.cfg.bio) Bio.rewrap(S.cfg.bio, pass).then((b) => { S.cfg.bio = b; saveCfg(S.cfg); }).catch(() => {});
       location.hash = '#/resumen';
@@ -240,7 +250,7 @@ document.addEventListener('submit', async (ev) => {
     S.cfg.tdKey = val('td').trim() || undefined;
     S.cfg.proxy = val('proxy').trim() || undefined;
     S.cfg.privStart = chk('privStart') || undefined;
-    if (!S.cfg.bio) {
+    if (!S.cfg.bio && !S.cfg.gate) {
       if (!chk('remember')) { if (S.cfg.pass) S.pass = S.cfg.pass; S.cfg.pass = undefined; }
       else if (!S.cfg.pass && passNow()) S.cfg.pass = passNow();
     }
@@ -262,6 +272,23 @@ async function bioOn(btn) {
     if ((await Bio.unlock(bio)) !== pass) throw new Error('La comprobación no coincide; no se ha activado.');
     S.cfg.bio = bio; S.cfg.pass = undefined; S.pass = pass; saveCfg(S.cfg);
     render(true);
+  } catch (e) {
+    msg.className = 'msg err'; msg.textContent = e.message; btn.disabled = false;
+    // Sin PRF (Firefox): se ofrece el bloqueo simple con la llave que se acaba de crear.
+    if (e.code === 'noprf') { S.gateCred = e.credId || null; const o = $('#gate-offer'); if (o) o.hidden = false; }
+  }
+}
+
+async function gateOn(btn) {
+  const msg = $('#bio-msg');
+  const pass = passNow();
+  if (!pass) { msg.textContent = 'Abre antes la cartera con la contraseña.'; return; }
+  btn.disabled = true; msg.className = 'msg'; msg.textContent = 'Sigue las instrucciones del móvil…';
+  try {
+    const id = S.gateCred || await Bio.createGate();
+    await Bio.verifyGate(id);   // comprobación antes de activarlo
+    S.cfg.gate = { id, at: new Date().toISOString() }; S.cfg.pass = pass; S.pass = pass; S.gateCred = null; saveCfg(S.cfg);
+    render(true);
   } catch (e) { msg.className = 'msg err'; msg.textContent = e.message; btn.disabled = false; }
 }
 
@@ -274,9 +301,12 @@ document.addEventListener('click', (ev) => {
   else if (t.id === 'b-retry') boot();
   else if (t.id === 'b-bio') bioUnlock();
   else if (t.id === 'b-bio-on') bioOn(t);
+  else if (t.id === 'b-gate-on') gateOn(t);
   else if (t.id === 'b-bio-off') {
     if (d.sure !== '1') { d.sure = '1'; t.textContent = '¿Seguro? Pulsa otra vez'; return; }
-    S.cfg.bio = undefined; saveCfg(S.cfg); render(true);
+    // Al quitar el bloqueo simple, la contraseña deja de guardarse (vuelve a pedirse al abrir).
+    if (S.cfg.gate) S.cfg.pass = undefined;
+    S.cfg.bio = undefined; S.cfg.gate = undefined; saveCfg(S.cfg); render(true);
   }
   else if (d.filter) { S.ui.filter = d.filter; saveUi(); render(true); }
   else if (d.range) { S.ui.range = d.range; saveUi(); render(true); }
@@ -323,11 +353,15 @@ window.addEventListener('offline', () => render(false));
   });
 })();
 
+let hiddenAt = 0;
 // Precios: al volver a la app y cada 5 minutos mientras está a la vista.
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible' && S.phase === 'ready' && !quotes.status.running && Date.now() - quotes.status.lastAt > QUOTE_EVERY) quotes.refresh(S.pkg);
   // «Abrir siempre oculto»: al salir de la app se vuelven a ocultar los importes.
   if (document.visibilityState === 'hidden' && S.cfg.privStart && !S.ui.priv) { S.ui.priv = true; setPriv(true); saveUi(); render(true); }
+  // Con huella: si la app ha estado más de 5 minutos fuera de la vista, se vuelve a bloquear.
+  if (document.visibilityState === 'hidden') hiddenAt = Date.now();
+  else if ((S.cfg.bio || S.cfg.gate) && S.phase === 'ready' && hiddenAt && Date.now() - hiddenAt > RELOCK_MS) { lock(); bioUnlock(); }
 });
 setInterval(() => {
   if (document.visibilityState === 'visible' && S.phase === 'ready' && navigator.onLine && !quotes.status.running) quotes.refresh(S.pkg);

@@ -53,11 +53,40 @@ export async function enable(pass) {
       },
     });
     const ext = cred.getClientExtensionResults ? cred.getClientExtensionResults() : {};
-    if (!ext.prf || ext.prf.enabled === false) throw new Error('noprf');
+    // Sin PRF (p. ej. Firefox para Android): la llave sirve para el bloqueo simple; se devuelve su id.
+    if (!ext.prf || ext.prf.enabled === false) throw Object.assign(new Error('noprf'), { credId: b64(cred.rawId) });
     const salt = rnd(32), iv = rnd(12);
     const key = await prfKey(cred.rawId, salt);
     const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, new TextEncoder().encode(pass));
     return { id: b64(cred.rawId), salt: b64(salt), iv: b64(iv), ct: b64(ct), at: new Date().toISOString() };
+  } catch (e) { throw Object.assign(new Error(explain(e)), { code: e && e.message === 'noprf' ? 'noprf' : null, credId: e && e.credId }); }
+}
+
+// ---------- bloqueo simple ----------
+// Para navegadores sin PRF. La huella solo abre la puerta de la app: la contraseña sigue guardada
+// sin cifrar en el almacenamiento del navegador. Protege frente a quien coja el móvil desbloqueado,
+// no frente a quien saque los datos del navegador con herramientas técnicas.
+export async function createGate() {
+  try {
+    const cred = await navigator.credentials.create({
+      publicKey: {
+        challenge: rnd(32), rp: { name: 'Cartera' },
+        user: { id: rnd(16), name: 'cartera', displayName: 'Cartera (desbloqueo)' },
+        pubKeyCredParams: [{ type: 'public-key', alg: -7 }, { type: 'public-key', alg: -257 }],
+        authenticatorSelection: { authenticatorAttachment: 'platform', residentKey: 'preferred', userVerification: 'required' },
+        timeout: 60000,
+      },
+    });
+    return b64(cred.rawId);
+  } catch (e) { throw new Error(explain(e)); }
+}
+export async function verifyGate(id) {
+  try {
+    const a = await navigator.credentials.get({
+      publicKey: { challenge: rnd(32), allowCredentials: [{ type: 'public-key', id: unb64(id) }], userVerification: 'required', timeout: 60000 },
+    });
+    if (!a) throw new Error('Sin respuesta de la huella.');
+    return true;
   } catch (e) { throw new Error(explain(e)); }
 }
 

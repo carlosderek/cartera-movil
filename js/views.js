@@ -353,11 +353,11 @@ export function setup(cfg, msg) {
 
 export function locked(cfg, msg, offline) {
   return '<section class="card form"><h1>Cartera bloqueada</h1>' +
-    (cfg.bio ? '<button class="btn primary bio" id="b-bio">' + FP + ' Desbloquear con huella</button><p class="muted center">o escribe la contraseña</p>'
+    (cfg.bio || cfg.gate ? '<button class="btn primary bio" id="b-bio">' + FP + ' Desbloquear con huella</button><p class="muted center">o escribe la contraseña</p>'
       : '<p class="muted">Escribe la contraseña de cifrado para abrir la copia de la cartera.</p>') +
     '<form id="f-unlock" autocomplete="off">' +
-    '<label>Contraseña<input name="pass" type="password" required autocomplete="current-password"' + (cfg.bio ? '' : ' autofocus') + '></label>' +
-    (cfg.bio ? '' : '<label class="check"><input name="remember" type="checkbox"> Recordar en este móvil</label>') +
+    '<label>Contraseña<input name="pass" type="password" required autocomplete="current-password"' + (cfg.bio || cfg.gate ? '' : ' autofocus') + '></label>' +
+    (cfg.bio || cfg.gate ? '' : '<label class="check"><input name="remember" type="checkbox"> Recordar en este móvil</label>') +
     (msg ? '<p class="msg err">' + esc(msg) + '</p>' : '') +
     (offline ? '<p class="msg">Sin conexión: se abrirá la última copia guardada.</p>' : '') +
     '<button class="btn primary" type="submit">Abrir</button></form>' +
@@ -372,16 +372,22 @@ export function settings(cfg, info, bioOk) {
     '<label>Clave de Twelve Data <small>(opcional: tiempo real para acciones de EE. UU.)</small><input name="td" type="password" value="' + esc(cfg.tdKey || '') + '" autocapitalize="off" spellcheck="false" placeholder="Sin clave: todo por Yahoo, ~15 min de retraso"></label>' +
     '<label>Intermediario para Yahoo y fondos<input name="proxy" value="' + esc(cfg.proxy || '') + '" placeholder="' + esc(DEFAULT_PROXY) + '" autocapitalize="off" spellcheck="false"></label>' +
     '<p class="foot">{url} se sustituye por la dirección de Yahoo tal cual; {urlenc}, codificada. Vacío = ' + esc(DEFAULT_PROXY) + '.</p>' +
-    (cfg.bio ? '' : '<label class="check"><input name="remember" type="checkbox"' + (cfg.pass ? ' checked' : '') + '> Recordar la contraseña en este móvil (sin cifrar)</label>') +
+    (cfg.bio || cfg.gate ? '' : '<label class="check"><input name="remember" type="checkbox"' + (cfg.pass ? ' checked' : '') + '> Recordar la contraseña en este móvil (sin cifrar)</label>') +
     '<label class="check"><input name="privStart" type="checkbox"' + (cfg.privStart ? ' checked' : '') + '> Abrir siempre con los importes ocultos</label>' +
     '<button class="btn primary" type="submit">Guardar</button></form></section>' +
     '<section class="card"><h2>Desbloqueo con huella</h2>' +
     (cfg.bio
       ? '<p>Activado desde el ' + dateTime(cfg.bio.at) + '. La contraseña se guarda cifrada y solo se abre con tu huella o el bloqueo de pantalla del móvil.</p><button class="btn" id="b-bio-off">Desactivar</button>'
+      : cfg.gate
+      ? '<p><b>Bloqueo simple activado</b> desde el ' + dateTime(cfg.gate.at) + '. La app pide la huella para abrirse y se vuelve a bloquear tras 5 minutos fuera de ella.</p>' +
+        '<p class="msg warn">La contraseña sigue guardada <b>sin cifrar</b> en este navegador: la huella protege frente a quien coja el móvil desbloqueado, no frente a quien saque los datos del navegador con herramientas técnicas. Para cifrarla de verdad, usa la app desde Chrome.</p>' +
+        '<button class="btn" id="b-bio-off">Desactivar</button>'
       : bioOk
         ? '<p class="muted">Guarda la contraseña cifrada con una llave de acceso de este móvil: abrirás la app con la huella y la contraseña deja de estar en claro.</p><button class="btn" id="b-bio-on">' + FP + ' Activar</button>'
         : '<p class="muted">Este navegador no permite llaves de acceso.</p>') +
-    '<p class="msg" id="bio-msg"></p></section>' +
+    '<p class="msg" id="bio-msg"></p>' +
+    (cfg.bio || cfg.gate ? '' : '<div id="gate-offer" hidden><p class="msg warn">Puedes usar el <b>bloqueo simple</b>: la app pedirá la huella para abrirse, pero la contraseña seguirá guardada sin cifrar en este navegador. Protege frente a quien coja el móvil desbloqueado, no frente a quien saque los datos del navegador con herramientas técnicas.</p><button class="btn" id="b-gate-on">' + FP + ' Usar el bloqueo simple</button></div>') +
+    '</section>' +
     '<section class="card"><h2>Estado</h2>' + info.map(([k, v]) => '<div class="kv"><span>' + esc(k) + '</span><b>' + esc(v) + '</b></div>').join('') + '</section>' +
     '<section class="card"><h2>Este dispositivo</h2>' +
     '<button class="btn" id="b-lock">Bloquear ahora</button> ' +
