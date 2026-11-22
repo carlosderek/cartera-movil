@@ -109,7 +109,7 @@ function statusInfo() {
   }
   info.push(['Twelve Data', S.cfg.tdKey ? 'con clave' : 'sin clave']);
   info.push(['Contraseña', S.cfg.pass ? 'recordada en este móvil' : 'se pide al abrir']);
-  info.push(['Versión de la app', '1.1.0']);
+  info.push(['Versión de la app', '1.1.1']);
   return info;
 }
 
@@ -246,25 +246,14 @@ setInterval(() => {
 setInterval(() => { if (S.phase === 'ready') header(); }, 30000);
 
 // ---------- service worker ----------
+// Cuando se activa una versión nueva, se avisa para recargar (los archivos nuevos ya están descargados).
 if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('sw.js').then((reg) => {
-    reg.addEventListener('updatefound', () => {
-      const w = reg.installing;
-      w && w.addEventListener('statechange', () => {
-        if (w.state === 'installed' && navigator.serviceWorker.controller) {
-          const n = $('#update'); n.hidden = false;
-        }
-      });
-    });
+  const hadController = !!navigator.serviceWorker.controller;
+  navigator.serviceWorker.addEventListener('controllerchange', () => { if (hadController) $('#update').hidden = false; });
+  navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then((reg) => {
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') reg.update().catch(() => {}); });
   }).catch(() => {});
 }
-$('#update').addEventListener('click', async () => {
-  const reg = await navigator.serviceWorker.getRegistration();
-  if (reg && reg.waiting) reg.waiting.postMessage('skip'); else location.reload();
-});
-if ('serviceWorker' in navigator) {
-  let reloaded = false;
-  navigator.serviceWorker.addEventListener('controllerchange', () => { if (!reloaded && $('#update').hidden === false) { reloaded = true; location.reload(); } });
-}
+$('#update').addEventListener('click', () => location.reload());
 
 boot();
