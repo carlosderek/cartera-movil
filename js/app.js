@@ -6,9 +6,9 @@ import * as V from './views.js';
 import * as Bio from './bio.js';
 import { ago, time, dateTime, setPriv } from './format.js';
 
-const APP_VERSION = '1.2.1';
+const APP_VERSION = '1.3.0';
 const UI_KEY = 'cm_ui_v1';
-const QUOTE_EVERY = 5 * 60 * 1000;
+const QUOTE_EVERY = 5 * 60 * 1000, GIST_RECHECK = 30 * 60 * 1000;
 const $ = (s) => document.querySelector(s);
 
 const S = {
@@ -16,6 +16,7 @@ const S = {
   pass: null,          // contraseña en memoria (si no se recuerda o va con huella)
   env: null, envFrom: null, envAt: null, gistErr: null,
   pkg: null, M: null, alerts: null,
+  hist: {},            // histórico de un año por posición (solo en memoria)
   phase: 'boot',       // boot | setup | locked | loading | ready | error
   msg: null,
   ui: Object.assign({ sort: 'val', dir: 'desc', filter: 'all', range: '1y', brange: '1y', dist: 'ty', q: '' },
@@ -56,6 +57,7 @@ function render(force) {
     v.querySelector('#plist').innerHTML = V.positionsList(S);
     return;
   }
+  if (r.name === 'pos' && S.phase === 'ready') ensureHist(r.arg);
   let html;
   if (r.name === 'ajustes' && S.phase !== 'boot') html = V.settings(S.cfg, statusInfo(), Bio.supported());
   else if (S.phase === 'setup') html = V.setup(S.cfg, S.msg);
@@ -72,6 +74,16 @@ function render(force) {
   if (changedView) window.scrollTo(0, 0); else if (window.scrollY !== y) window.scrollTo(0, y);
   const pw = v.querySelector('input[type=password][autofocus]');
   if (pw && changedView) pw.focus();
+}
+
+// Histórico de la posición abierta: se pide una vez y se guarda 30 minutos en memoria.
+function ensureHist(id) {
+  const h = S.hist[id];
+  if (h && (h.loading || Date.now() - h.at < 30 * 60000)) return;
+  const p = S.pkg && S.pkg.positions.find((x) => String(x.id) === String(id));
+  if (!p || !navigator.onLine) return;
+  S.hist[id] = { loading: true, at: Date.now() };
+  quotes.history(p).then((r) => { S.hist[id] = Object.assign({ at: r ? Date.now() : Date.now() - 28 * 60000 }, r || {}); schedule(); });
 }
 
 function header() {
@@ -326,7 +338,22 @@ document.addEventListener('change', (ev) => {
 document.addEventListener('input', (ev) => {
   if (ev.target.id === 'q') { S.ui.q = ev.target.value; const l = $('#plist'); if (l) l.innerHTML = V.positionsList(S); }
 });
-window.addEventListener('hashchange', () => render(true));
+// Navegación: «Volver» regresa a la pantalla anterior y a la altura donde estabas.
+try { history.scrollRestoration = 'manual'; } catch (e) {}
+const scrollPos = {};
+let curHash = location.hash, byLink = false, visited = 0;
+document.addEventListener('click', (ev) => {
+  const a = ev.target.closest('a[href^="#/"]');
+  if (!a) return;
+  if (a.hasAttribute('data-back') && visited > 0) { ev.preventDefault(); history.back(); return; }
+  byLink = true;
+});
+window.addEventListener('hashchange', () => {
+  scrollPos[curHash] = window.scrollY; curHash = location.hash; visited++;
+  const back = !byLink; byLink = false;
+  render(true);
+  if (back && scrollPos[curHash]) window.scrollTo(0, scrollPos[curHash]);
+});
 window.addEventListener('online', () => { if (S.phase === 'ready') manualRefresh(); else render(true); });
 window.addEventListener('offline', () => render(false));
 
@@ -356,7 +383,9 @@ window.addEventListener('offline', () => render(false));
 let hiddenAt = 0;
 // Precios: al volver a la app y cada 5 minutos mientras está a la vista.
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible' && S.phase === 'ready' && !quotes.status.running && Date.now() - quotes.status.lastAt > QUOTE_EVERY) quotes.refresh(S.pkg);
+  // Al volver tras más de 30 minutos cuenta como abrir la app: se mira si el escritorio subió una copia nueva.
+  if (document.visibilityState === 'visible' && S.phase === 'ready' && navigator.onLine && Date.now() - lastGistAt > GIST_RECHECK) background(passNow());
+  else if (document.visibilityState === 'visible' && S.phase === 'ready' && !quotes.status.running && Date.now() - quotes.status.lastAt > QUOTE_EVERY) quotes.refresh(S.pkg);
   // «Abrir siempre oculto»: al salir de la app se vuelven a ocultar los importes.
   if (document.visibilityState === 'hidden' && S.cfg.privStart && !S.ui.priv) { S.ui.priv = true; setPriv(true); saveUi(); render(true); }
   // Con huella: si la app ha estado más de 5 minutos fuera de la vista, se vuelve a bloquear.

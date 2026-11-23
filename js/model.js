@@ -98,7 +98,7 @@ export function compute(pkg, quotes) {
 
 // ---------- avisos agregados ----------
 export function alertsOf(pkg, M, quotes) {
-  const out = { data: [], sell: [], thesis: [], ideas: [], dates: [] };
+  const out = { data: [], sell: [], thesis: [], ideas: [], dates: [], later: [] };
   if (pkg.clone) out.data.push({ s: 'high', t: 'Datos del clon de pruebas', d: 'Este paquete lo subió el clon de pruebas del escritorio, no la app real.' });
   const age = (Date.now() - Date.parse(pkg.generatedAt)) / 86400000;
   if (age >= 2) out.data.push({ s: age >= 7 ? 'high' : 'med', t: 'Datos del escritorio de hace ' + Math.floor(age) + ' días', d: 'Nota de salud, avisos, escenarios y ciclo valen a esa fecha. Abre la app de escritorio para que suba una copia nueva.' });
@@ -113,14 +113,15 @@ export function alertsOf(pkg, M, quotes) {
     const p = d.p, th = p.th || {};
     (th.sell || []).forEach((s) => { if (s.x) out.sell.push({ p, s }); });
     (th.avisos || []).forEach((a) => out.thesis.push({ p, a }));
-    (th.ev || []).forEach((e) => { const n = daysUntil(e.d); if (n != null && n >= 0 && n <= 14) out.dates.push({ p, d: e.d, n, k: e.k, t: e.t, ok: e.ok }); });
+    (th.ev || []).forEach((e) => { const n = daysUntil(e.d); if (n != null && n >= 0) (n <= 14 ? out.dates : out.later).push({ p, d: e.d, n, k: e.k, t: e.t, ok: e.ok }); });
     const ne = daysUntil(th.nextE);
-    if (ne != null && ne >= 0 && ne <= 14 && !(th.ev || []).some((e) => e.d === th.nextE)) out.dates.push({ p, d: th.nextE, n: ne, k: 'Resultados', t: '', ok: null });
+    if (ne != null && ne >= 0 && !(th.ev || []).some((e) => e.d === th.nextE)) (ne <= 14 ? out.dates : out.later).push({ p, d: th.nextE, n: ne, k: 'Resultados', t: '', ok: null });
     const rv = daysUntil(th.review);
-    if (rv != null && rv <= 14) out.dates.push({ p, d: th.review, n: rv, k: 'Revisión de la tesis', t: rv < 0 ? 'Vencida' : '', ok: null });
+    if (rv != null) (rv <= 14 ? out.dates : out.later).push({ p, d: th.review, n: rv, k: 'Revisión de la tesis', t: rv < 0 ? 'Vencida' : '', ok: null });
   });
   out.thesis.sort((a, b) => (a.a.s === b.a.s ? 0 : a.a.s === 'high' ? -1 : 1));
   out.dates.sort((a, b) => a.n - b.n);
+  out.later.sort((a, b) => a.n - b.n);
   out.ideas = M.ideas.filter((x) => x.hit);
   out.count = out.sell.length + out.thesis.filter((x) => x.a.s === 'high').length + out.ideas.length + out.data.filter((x) => x.s === 'high').length;
   return out;

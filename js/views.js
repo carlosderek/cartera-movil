@@ -24,8 +24,10 @@ function chip(text, kind) { return '<span class="chip ' + (kind || '') + '">' + 
 // ---------- gráficas ----------
 function lineChart(lines, opt) {
   const W = 320, H = 150, P = { l: 4, r: 4, t: 8, b: 20 };
+  const hl = (opt.hlines || []).filter((h) => isNum(h.v));
   const all = lines.flatMap((l) => l.v.filter(isNum));
   if (!all.length) return '';
+  hl.forEach((h) => all.push(h.v));
   let lo = Math.min(...all), hi = Math.max(...all);
   if (hi - lo < 1e-9) { hi += 1; lo -= 1; }
   const pad = (hi - lo) * 0.08; lo -= pad; hi += pad;
@@ -33,6 +35,10 @@ function lineChart(lines, opt) {
   const x = (i) => P.l + (n > 1 ? i / (n - 1) : 0) * (W - P.l - P.r);
   const y = (v) => P.t + (1 - (v - lo) / (hi - lo)) * (H - P.t - P.b);
   let g = '';
+  hl.forEach((h) => {
+    const yy = y(h.v).toFixed(1);
+    g += '<line class="hl ' + h.cls + '" x1="' + P.l + '" x2="' + (W - P.r) + '" y1="' + yy + '" y2="' + yy + '"/><text class="ax end hl ' + h.cls + '" x="' + (W - P.r) + '" y="' + (y(h.v) - 3).toFixed(1) + '">' + esc(h.l) + '</text>';
+  });
   if (isNum(opt.ref)) g += '<line class="ref" x1="' + P.l + '" x2="' + (W - P.r) + '" y1="' + y(opt.ref).toFixed(1) + '" y2="' + y(opt.ref).toFixed(1) + '"/>';
   lines.forEach((l) => {
     let d = '', pen = false;
@@ -96,6 +102,29 @@ function distCard(S) {
     '<p class="foot">Sobre el valor de las posiciones, sin liquidez.</p></section>';
 }
 
+function thesisCard(S) {
+  const pos = S.M.pos, tot = S.M.totals.value || 1;
+  let hw = 0, hs = 0, pw = 0, ps = 0;
+  const band = { good: 0, mid: 0, bad: 0, na: 0 }, cnt = { good: 0, mid: 0, bad: 0, na: 0 };
+  pos.forEach((d) => {
+    const h = d.p.th && d.p.th.health, k = healthCls(h);
+    band[k] += d.val; cnt[k]++;
+    if (isNum(h)) { hw += d.val; hs += d.val * h; }
+    if (isNum(d.pot)) { pw += d.val; ps += d.val * d.pot; }
+  });
+  if (!hw && !pw) return '';
+  const touched = S.alerts ? S.alerts.sell.length : 0;
+  const L = { good: 'Sanas (70+)', mid: 'A vigilar (40–69)', bad: 'Débiles (<40)', na: 'Sin nota' };
+  const avg = hw ? hs / hw : null;
+  return '<section class="card"><h2>Tus tesis</h2><div class="vs">' +
+    '<div><span>Salud media</span><b class="h-' + healthCls(avg) + '">' + (isNum(avg) ? Math.round(avg) : '—') + '</b></div>' +
+    '<div><span>Potencial al base</span><b class="' + cls(pw ? ps / pw : null) + '">' + (pw ? pct(ps / pw, 0) : '—') + '</b></div>' +
+    '<div><span>Ventas tocadas</span><b class="' + (touched ? 'down' : '') + '">' + touched + '</b></div></div>' +
+    '<div class="hbar">' + ['good', 'mid', 'bad', 'na'].filter((k) => band[k] > 0).map((k) => '<i class="' + k + '" style="width:' + (band[k] / tot * 100).toFixed(1) + '%"></i>').join('') + '</div>' +
+    ['good', 'mid', 'bad', 'na'].filter((k) => cnt[k]).map((k) => '<div class="kv"><span><i class="sw ' + k + '"></i>' + L[k] + ' <small class="muted">· ' + cnt[k] + '</small></span><b>' + pct(band[k] / tot, 0, false) + '</b></div>').join('') +
+    '<p class="foot">Medias ponderadas por valor. Potencial sobre el ' + pct(pw / tot, 0, false) + ' de la cartera que tiene escenario base. Notas del escritorio a fecha de ' + dateTime(S.pkg.generatedAt) + '.</p></section>';
+}
+
 // ---------- Resumen ----------
 function cycleLine(c) {
   if (!c) return '';
@@ -147,7 +176,7 @@ export function summary(S) {
       '<div><span>Liquidez</span><b>' + eur(T.cash) + '</b><small class="muted">' + (T.grand > 0 ? pct(T.cash / T.grand, 1, false) : '') + '</small></div>' +
     '</div></section>' +
     (alerts.count ? '<a class="card alert-link" href="#/avisos"><span class="badge">' + alerts.count + '</span> ' + (alerts.count === 1 ? 'aviso importante' : 'avisos importantes') + chev + '</a>' : '') +
-    histCard(S) + benchCard(S) +
+    histCard(S) + benchCard(S) + thesisCard(S) +
     cycleLine(pkg.cycle) +
     '<section class="card"><h2>Las que más suben</h2>' + (up.length ? up.map(moverRow).join('') : '<p class="empty">' + (noDay ? 'Esperando cotizaciones…' : 'Ninguna sube hoy.') + '</p>') + '</section>' +
     '<section class="card"><h2>Las que más bajan</h2>' + (down.length ? down.map(moverRow).join('') : '<p class="empty">' + (noDay ? 'Esperando cotizaciones…' : 'Ninguna baja hoy.') + '</p>') + '</section>' +
@@ -287,13 +316,33 @@ function textBlock(id, title, body, ui) {
   return '<section class="card"><button class="fold' + (open ? ' open' : '') + '" data-fold="' + id + '"><h2>' + title + '</h2>' + chev + '</button>' + (open ? '<div class="prose">' + paras(body) + '</div>' : '') + '</section>';
 }
 
+function priceCard(S, d) {
+  const h = S.hist[d.p.id], p = d.p;
+  if (!h) return '';
+  if (h.loading) return '<section class="card"><h2>Cotización · 1 año</h2><p class="empty">Descargando…</p></section>';
+  if (!h.pts) return p.ty === 'Fondo' ? '' : '<section class="card"><h2>Cotización · 1 año</h2><p class="empty">No se pudo descargar el histórico.</p></section>';
+  const nc = (c) => (c === 'GBp' ? 'GBX' : c);
+  const vals = h.pts.map((x) => x[1]);
+  if (isNum(d.px) && nc(d.cur) === h.cur) vals.push(d.px);
+  const hlines = [];
+  if (nc(p.cur) === h.cur && isNum(p.buy)) hlines.push({ v: p.buy, cls: 'buy', l: 'tu compra' });
+  const base = p.th && p.th.sc && p.th.sc.base && p.th.sc.base.p;
+  if (isNum(base) && nc((p.th && p.th.cur) || p.cur) === h.cur) hlines.push({ v: base, cls: 'base', l: 'base' });
+  const perf = vals[vals.length - 1] / vals[0] - 1;
+  const iso = (ms) => new Date(ms).toISOString().slice(0, 10);
+  return '<section class="card"><h2>Cotización · 1 año</h2>' +
+    lineChart([{ v: vals, cls: 'port' }], { from: date(iso(h.pts[0][0])), to: 'hoy', hlines, label: 'Cotización de ' + p.t }) +
+    '<div class="legend"><span>En un año <b class="' + cls(perf) + '">' + pct(perf, 1) + '</b></span><span>Mín. ' + price(Math.min(...vals), h.cur) + ' · Máx. ' + price(Math.max(...vals), h.cur) + '</span></div>' +
+    '<p class="foot">Cierres diarios de ' + esc(h.src) + ', sin dividendos.</p></section>';
+}
+
 export function detail(S, id) {
   const d = S.M.pos.find((x) => String(x.p.id) === String(id));
   if (!d) return '<p class="empty">Esa posición ya no está en el paquete.</p><p><a class="btn" href="#/posiciones">Volver a posiciones</a></p>';
   const p = d.p, cur = p.cur;
   const now = d.priceIn(cur);
   const meta = [p.ty, p.ctry, p.sec, p.q && p.q.ex].filter(Boolean).map(esc).join(' · ');
-  return '<a class="back" href="#/posiciones">‹ Posiciones</a>' +
+  return '<a class="back" data-back href="#/posiciones">‹ Volver</a>' +
     '<section class="hero detail"><div class="lbl">' + esc(p.t) + (p.q && p.q.isin ? ' · ' + esc(p.q.isin) : '') + '</div>' +
     '<h1>' + esc(p.n) + '</h1><div class="muted small">' + meta + '</div>' +
     '<div class="big">' + price(d.px, d.cur) + '</div>' +
@@ -313,7 +362,7 @@ export function detail(S, id) {
     (isNum(p.lo) && isNum(p.hi) ? '<h3>Rango de 52 semanas</h3>' + rangeBar(Math.min(p.lo, now || p.lo), Math.max(p.hi, now || p.hi), [{ v: p.buy, k: 'buy', l: 'compra' }, { v: now, k: 'now', l: 'hoy' }]) +
       '<div class="rlbl"><span>' + price(p.lo, cur) + '</span><span>' + price(p.hi, cur) + '</span></div>' : '') +
     '</section>' +
-    scenarios(d) + healthCard(p) + sellCard(p) + datesCard(p) +
+    priceCard(S, d) + scenarios(d) + healthCard(p) + sellCard(p) + datesCard(p) +
     textBlock('t:' + p.id, 'Tesis', p.th && p.th.text, S.ui) +
     textBlock('c:' + p.id, 'Catalizadores', p.th && p.th.cat, S.ui) +
     textBlock('r:' + p.id, 'Riesgos', p.th && p.th.risks, S.ui) +
@@ -332,6 +381,11 @@ export function alerts(S) {
   if (A.ideas.length) h += sec('Ideas en precio de compra', A.ideas.map((x) => '<div class="aitem ok"><b>' + esc(x.i.t) + ' · ' + esc(x.i.n) + '</b><p>' + price(x.px, x.i.cur) + ' ' + (x.i.dir === 'above' ? 'por encima de' : 'por debajo de') + ' ' + price(x.i.trg, x.i.cur) +
     (isNum(x.i.base) && x.px > 0 ? ' · objetivo base ' + price(x.i.base, x.i.cur) + ' (' + pct(x.i.base / x.px - 1, 0) + ')' : '') + (x.isLive ? '' : ' · precio del escritorio') + '</p></div>').join(''));
   if (A.dates.length) h += sec('Próximos 14 días', A.dates.map((x) => '<div class="date-row"><div class="date-d"><b>' + date(x.d) + '</b><small>' + (x.n === 0 ? 'hoy' : x.n < 0 ? 'vencida' : x.n === 1 ? 'mañana' : 'en ' + x.n + ' días') + '</small></div><div><b>' + link(x.p) + ' · ' + esc(x.k || 'Evento') + '</b>' + (x.ok === false ? ' ' + chip('estimada') : '') + (x.t ? '<p>' + esc(x.t) + '</p>' : '') + '</div></div>').join(''));
+  if (A.later.length) {
+    const open = S.ui.open.has('later');
+    h += '<section class="card"><button class="fold' + (open ? ' open' : '') + '" data-fold="later"><h2>Más adelante · ' + A.later.length + ' fechas</h2>' + chev + '</button>' +
+      (open ? '<div class="later">' + A.later.map((x) => '<div class="date-row"><div class="date-d"><b>' + date(x.d) + '</b><small>en ' + x.n + ' días</small></div><div><b>' + link(x.p) + ' · ' + esc(x.k || 'Evento') + '</b>' + (x.ok === false ? ' ' + chip('estimada') : '') + (x.t ? '<p>' + esc(x.t) + '</p>' : '') + '</div></div>').join('') + '</div>' : '') + '</section>';
+  }
   const near = S.M.ideas.filter((x) => !x.hit && isNum(x.dist) && Math.abs(x.dist) <= 0.05);
   if (near.length) h += sec('Ideas cerca del disparo', near.map((x) => '<div class="kv"><span>' + esc(x.i.t) + ' <small class="muted">' + esc(x.i.n) + '</small></span><b>' + pct(x.dist, 1) + '</b></div>').join(''));
   if (!h) h = '<div class="card"><p class="empty">Sin avisos. Todo en orden a fecha de ' + dateTime(S.pkg.generatedAt) + '.</p></div>';

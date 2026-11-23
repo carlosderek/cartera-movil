@@ -242,3 +242,13 @@ h2 + .date-row { border-top: 0; }
 .ptr.show { opacity: 1; transition: none; }
 .ptr.ready { color: var(--blue); border-color: var(--blue); }
 @media (min-width: 560px) { .toolbar .search { flex: 1 1 100%; } .toolbar { flex-wrap: wrap; } }
+
+/* v1.3 — gráfica de la ficha y resumen de tesis */
+.chart .hl { stroke-width: 1.2; vector-effect: non-scaling-stroke; stroke-dasharray: 5 3; }
+.chart .hl.buy { stroke: var(--fg2); } .chart .hl.base { stroke: var(--up); }
+.chart text.hl { stroke: none; } .chart text.hl.buy { fill: var(--fg2); } .chart text.hl.base { fill: var(--up); }
+.hbar { display: flex; height: 9px; border-radius: 5px; overflow: hidden; background: var(--bg2); margin: 10px 0 4px; gap: 2px; }
+.hbar i { display: block; height: 100%; }
+.hbar .good, .sw.good { background: var(--good); } .hbar .mid, .sw.mid { background: var(--mid); } .hbar .bad, .sw.bad { background: var(--bad); } .hbar .na, .sw.na { background: var(--fg3); }
+.h-good { color: var(--good); } .h-mid { color: var(--mid); } .h-bad { color: var(--bad); }
+.later { margin-top: 8px; }

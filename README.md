@@ -10,10 +10,11 @@ Sin dependencias ni paso de compilación: HTML, CSS y módulos JavaScript.
 
 - **Resumen**: patrimonio (posiciones + liquidez), variación del día y la del índice compuesto, ganancia,
   evolución del patrimonio (1 mes a todo), tu cartera frente al índice compuesto (día y periodo), línea de
-  ciclo, las que más suben y bajan, distribución por tipo, sector, país o moneda, y liquidez por cuenta.
+  resumen de tus tesis (salud media, potencial al base, reparto por nota), ciclo, las que más suben y bajan, distribución por tipo, sector, país o moneda, y liquidez por cuenta.
 - **Posiciones**: buscador, filtro por tipo y orden por valor, día, ganancia, potencial al escenario base,
   precio frente a tu compra o salud.
-- **Ficha**: precio y fuente, posición, rango de 52 semanas con el precio de compra, escenarios con
+- **Ficha**: precio y fuente, posición, rango de 52 semanas con el precio de compra, cotización de un año
+  con tu compra y el objetivo base marcados, escenarios con
   potencial y valor esperado, nota de salud y avisos, criterios de venta, próximas fechas, y tesis,
   catalizadores y riesgos plegables.
 - **Ideas**: las ideas activas ordenadas por cercanía al precio de disparo, con su potencial.

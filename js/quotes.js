@@ -50,25 +50,54 @@ export function createQuotes({ getCfg, onChange }) {
   const changed = () => { try { onChange(); } catch (e) {} };
 
   // ---------- intermediario con presupuesto por minuto ----------
+  // g = generación del refresco (se abandona si empieza otro); null = petición suelta, no se cancela.
+  // Si el intermediario responde 429 (límite por minuto), espera a la siguiente ventana y lo intenta una vez más.
   async function proxyText(url, g) {
-    for (;;) {
-      if (g !== gen) return null;
-      const now = Date.now();
-      proxyHits = proxyHits.filter((t) => now - t < 60000);
-      if (proxyHits.length < PROXY_PER_MIN) break;
-      status.waiting = true; changed();
-      await sleep(60000 - (now - proxyHits[0]) + 250);
-    }
-    status.waiting = false;
-    proxyHits.push(Date.now());
     const tpl = (getCfg().proxy || '').trim() || DEFAULT_PROXY;
     const target = tpl.includes('{urlenc}') ? tpl.replace('{urlenc}', encodeURIComponent(url))
       : tpl.includes('{url}') ? tpl.replace('{url}', url) : tpl + url;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      for (;;) {
+        if (g != null && g !== gen) return null;
+        const now = Date.now();
+        proxyHits = proxyHits.filter((t) => now - t < 60000);
+        if (proxyHits.length < PROXY_PER_MIN) break;
+        status.waiting = true; changed();
+        await sleep(60000 - (now - proxyHits[0]) + 250);
+      }
+      status.waiting = false;
+      proxyHits.push(Date.now());
+      try {
+        const r = await fetch(target, { cache: 'no-store', signal: withTimeout(12000) });
+        if (r.status === 429) { proxyHits = Array(PROXY_PER_MIN).fill(Date.now()); continue; }
+        if (!r.ok) return null;
+        return await r.text();
+      } catch (e) { return null; }
+    }
+    return null;
+  }
+
+  // ---------- histórico de un año para la gráfica de la ficha ----------
+  async function history(p) {
     try {
-      const r = await fetch(target, { cache: 'no-store', signal: withTimeout(12000) });
-      if (r.status === 429) { proxyHits = Array(PROXY_PER_MIN).fill(Date.now()); return null; }
-      if (!r.ok) return null;
-      return await r.text();
+      if (p.ty === 'Fondo') return null;
+      if (p.ty === 'Cripto') {
+        if (!(p.q && p.q.cg)) return null;
+        const r = await fetch('https://api.coingecko.com/api/v3/coins/' + encodeURIComponent(p.q.cg) + '/market_chart?vs_currency=eur&days=365&interval=daily', { cache: 'no-store', signal: withTimeout(10000) });
+        if (!r.ok) return null;
+        const j = await r.json();
+        const pts = (j.prices || []).filter((x) => x[1] > 0);
+        return pts.length > 5 ? { pts, cur: 'EUR', src: 'CoinGecko' } : null;
+      }
+      const sym = (p.q && p.q.y) || p.t;
+      const text = await proxyText(YF_CHART + encodeURIComponent(sym) + '?range=1y&interval=1d', null);
+      if (!text) return null;
+      const j = extractJson(text, '{"chart"');
+      const res = j && j.chart && j.chart.result && j.chart.result[0];
+      const ts = (res && res.timestamp) || [], cl = (res && res.indicators && res.indicators.quote && res.indicators.quote[0] && res.indicators.quote[0].close) || [];
+      const pts = [];
+      for (let i = 0; i < ts.length; i++) if (cl[i] > 0) pts.push([ts[i] * 1000, cl[i]]);
+      return pts.length > 5 ? { pts, cur: normCur(res.meta && res.meta.currency), src: 'Yahoo' } : null;
     } catch (e) { return null; }
   }
 
@@ -227,5 +256,5 @@ export function createQuotes({ getCfg, onChange }) {
 
   function stop() { gen++; status.running = false; status.waiting = false; changed(); }
 
-  return { live, fx, status, refresh, stop };
+  return { live, fx, status, refresh, stop, history };
 }
